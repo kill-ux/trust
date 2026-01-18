@@ -4,7 +4,7 @@ use std::{
 };
 
 use etherparse::{NetSlice, SlicedPacket, TransportSlice};
-use trust::{Quad, TcpConnection, TcpState};
+use trust::{Quad, TcpConnection};
 use tun_tap::{Iface, Mode};
 
 fn main() -> io::Result<()> {
@@ -32,18 +32,28 @@ fn main() -> io::Result<()> {
                                     TransportSlice::Tcp(tcp) => {
                                         let quad = Quad::from_packet(iph, &tcp);
 
-                                        match connections.entry(quad) {
+                                        let reply = match connections.entry(quad) {
                                             Entry::Occupied(mut occupied) => {
-                                                occupied.get_mut().on_packet(iph, tcp);
+                                                occupied.get_mut().on_packet(iph, &tcp)
                                             }
                                             Entry::Vacant(vacant) => {
                                                 if tcp.syn() {
-                                                    let mut conn = TcpConnection::new();
-                                                    conn.on_packet(iph, tcp);
+                                                    let mut conn = TcpConnection::new(&tcp);
+                                                    let response = conn.on_packet(iph, &tcp);
                                                     vacant.insert(conn);
-                                                    println!("New connection! State: SynRcvd");
+                                                    println!("New connection! State: Listen");
+                                                    response
+                                                } else {
+                                                    None
                                                 }
                                             }
+                                        };
+
+                                        if let Some(mut packet_bytes) = reply {
+                                            println!("Sending reply packet");
+                                            let mut final_packet = vec![0u8, 0, 8, 0];
+                                            final_packet.append(&mut packet_bytes);
+                                            nic.send(&final_packet)?;
                                         }
                                     }
                                     _ => eprintln!("Non-TCP packet received"),
