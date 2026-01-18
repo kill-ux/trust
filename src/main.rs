@@ -1,6 +1,6 @@
 use std::io;
 
-use etherparse::{Ipv4HeaderSlice, NetSlice, SlicedPacket};
+use etherparse::{NetSlice, SlicedPacket, TransportSlice};
 use tun_tap::{Iface, Mode};
 
 fn main() -> io::Result<()> {
@@ -21,14 +21,27 @@ fn main() -> io::Result<()> {
                 if let Some(net) = value.net {
                     match net {
                         NetSlice::Ipv4(ipv4) => {
-                            println!("IPv4 Packet: {} -> {}", ipv4.header().source_addr(), ipv4.header().destination_addr());
-                        },
+                            let src = ipv4.header().source_addr();
+                            let dst = ipv4.header().destination_addr();
+                            let proto = ipv4.header().protocol();
+
+                            println!("IPv4: {} -> {} | Protocol: {:?}", src, dst, proto);
+
+                            if let Some(transport) = value.transport {
+                                match transport {
+                                    TransportSlice::Tcp(tcp) => {
+                                        println!("  └─ TCP Port: {} -> {}", tcp.source_port(), tcp.destination_port());
+                                    }
+                                    _ => eprintln!("Non-TCP packet received"),
+                                }
+                            }
+                        }
                         _ => {
                             eprintln!("Non-IPv4 packet received");
-                        },
+                        }
                     }
                 }
-            },
+            }
             Err(e) => eprintln!("Failed to parse packet: {:?}", e),
         }
     }
