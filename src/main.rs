@@ -1,9 +1,14 @@
-use std::io;
+use std::{
+    collections::{hash_map::Entry, HashMap},
+    io,
+};
 
 use etherparse::{NetSlice, SlicedPacket, TransportSlice};
+use trust::{Quad, TcpConnection, TcpState};
 use tun_tap::{Iface, Mode};
 
 fn main() -> io::Result<()> {
+    let mut connections: HashMap<Quad, TcpConnection> = Default::default();
     let nic = Iface::new("tun0", Mode::Tun)?;
     let mut buf = [0u8; 1504];
     loop {
@@ -21,16 +26,25 @@ fn main() -> io::Result<()> {
                 if let Some(net) = value.net {
                     match net {
                         NetSlice::Ipv4(ipv4) => {
-                            let src = ipv4.header().source_addr();
-                            let dst = ipv4.header().destination_addr();
-                            let proto = ipv4.header().protocol();
-
-                            println!("IPv4: {} -> {} | Protocol: {:?}", src, dst, proto);
-
+                            let iph = ipv4.header();
                             if let Some(transport) = value.transport {
                                 match transport {
                                     TransportSlice::Tcp(tcp) => {
-                                        println!("  └─ TCP Port: {} -> {}", tcp.source_port(), tcp.destination_port());
+                                        let quad = Quad::from_packet(iph, &tcp);
+
+                                        match connections.entry(quad) {
+                                            Entry::Occupied(mut occupied) => {
+                                                occupied.get_mut().on_packet(iph, tcp);
+                                            }
+                                            Entry::Vacant(vacant) => {
+                                                if tcp.syn() {
+                                                    let mut conn = TcpConnection::new();
+                                                    conn.on_packet(iph, tcp);
+                                                    vacant.insert(conn);
+                                                    println!("New connection! State: SynRcvd");
+                                                }
+                                            }
+                                        }
                                     }
                                     _ => eprintln!("Non-TCP packet received"),
                                 }
